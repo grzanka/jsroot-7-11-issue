@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>jsroot 7.11.0 — circular dependency evaluation-order bug</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 960px;
+        margin: 2rem auto;
+        padding: 0 1.5rem;
+        line-height: 1.5;
+        color: #1a1a1a;
+      }
+      h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
+      h2 { font-size: 1.1rem; margin: 0 0 0.5rem; }
+      .subtitle { color: #555; margin-top: 0; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.5rem 0; }
+      @media (max-width: 640px) { .grid { grid-template-columns: 1fr; } }
+      .card {
+        border: 2px solid #ddd;
+        border-radius: 8px;
+        padding: 1rem;
+      }
+      .card.broken { border-color: #dc2626; }
+      .card.fixed  { border-color: #16a34a; }
+      .card-title  { font-weight: 600; font-size: 1rem; margin-bottom: 0.5rem; }
+      .card.broken .card-title { color: #dc2626; }
+      .card.fixed  .card-title { color: #16a34a; }
+      .status { font-size: 0.85rem; min-height: 1.5rem; margin: 0.5rem 0; word-break: break-word; }
+      .status.pending { color: #555; }
+      .status.ok      { color: #16a34a; font-weight: 600; }
+      .status.error   { color: #dc2626; font-weight: 600; }
+      .plot {
+        width: 100%;
+        height: 260px;
+        border: 1px dashed #bbb;
+        border-radius: 4px;
+        margin: 0.5rem 0;
+        overflow: hidden;
+      }
+      button {
+        padding: 0.4rem 1rem;
+        border: 1px solid #555;
+        border-radius: 4px;
+        background: #f5f5f5;
+        cursor: pointer;
+        font-size: 0.9rem;
+      }
+      button:hover { background: #e5e5e5; }
+      pre.stack {
+        font-size: 0.75rem;
+        white-space: pre-wrap;
+        word-break: break-all;
+        color: #dc2626;
+        padding: 0.5rem;
+        margin: 0;
+      }
+      details { margin: 1.5rem 0; }
+      summary { cursor: pointer; font-weight: 600; }
+      code { font-family: monospace; background: #f1f1f1; padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.9em; }
+      pre.code { background: #f5f5f5; padding: 0.75rem 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.82rem; line-height: 1.5; }
+    </style>
+  </head>
+  <body>
+    <h1>jsroot 7.11.0 — circular dependency evaluation-order bug</h1>
+    <p class="subtitle">
+      Minimal Vite 6 / Rollup repro. Open the browser console to see the full
+      error. See <a href="README.md">README.md</a> for analysis and the upstream
+      issue report text.
+    </p>
+
+    <div class="grid">
+      <!-- ── Broken: ESM import ─────────────────────────────── -->
+      <div class="card broken">
+        <div class="card-title">❌ Broken — <code>import("jsroot")</code></div>
+        <p style="font-size:0.85rem; margin: 0 0 0.5rem;">
+          Rollup bundles jsroot, evaluating <code>ObjectPainter.mjs</code>
+          before <code>core.mjs</code> has set <code>internals</code>.
+          Line 1828 throws <code>TypeError: can't access property "jsroot" of
+          undefined</code>.
+        </p>
+        <p class="status pending" id="esm-status">Click the button to try…</p>
+        <div class="plot" id="esm-plot"></div>
+        <button id="esm-btn">Try ESM import</button>
+      </div>
+
+      <!-- ── Fixed: UMD script tag ──────────────────────────── -->
+      <div class="card fixed">
+        <div class="card-title">✅ Fixed — UMD <code>&lt;script&gt;</code> tag</div>
+        <p style="font-size:0.85rem; margin: 0 0 0.5rem;">
+          jsroot's own pre-built <code>jsroot.min.js</code> is loaded via a
+          <code>&lt;script&gt;</code> tag. jsroot's own Rollup build uses the
+          correct evaluation order — no bundler involved.
+        </p>
+        <p class="status pending" id="umd-status">Click the button to try…</p>
+        <div class="plot" id="umd-plot"></div>
+        <button id="umd-btn">Try UMD load</button>
+      </div>
+    </div>
+
+    <details>
+      <summary>What exactly breaks and why</summary>
+      <p>
+        jsroot has a circular dependency between its own modules:
+      </p>
+      <pre class="code">main.mjs → core.mjs
+main.mjs → ObjectPainter.mjs → core.mjs  ← circular</pre>
+      <p>
+        At the top level of <code>ObjectPainter.mjs</code> (line 1828):
+      </p>
+      <pre class="code">// ObjectPainter.mjs:1828 — runs at module evaluation time
+Object.assign(internals.jsroot, { ObjectPainter, cleanup, resize });</pre>
+      <p>
+        <code>internals</code> is imported from <code>core.mjs</code>.
+        When Rollup linearises the circular dependency it must pick an order.
+        In jsroot 7.10.3 the order happened to be correct.
+      </p>
+      <p>
+        jsroot 7.11.0 added <code>import('@resvg/resvg-js')</code> in
+        <code>BasePainter.mjs</code> for Node.js PNG support.
+        Since <code>@resvg/resvg-js</code> is a native <code>.node</code>
+        binary, browser projects <em>must</em> alias it to a stub — otherwise
+        the build fails outright. That alias introduces a cross-package import
+        (<code>node_modules/jsroot → src/shims/</code>) that changes Rollup's
+        chunk-split decisions and alters the module evaluation order, causing
+        <code>ObjectPainter.mjs</code> to be evaluated <em>before</em>
+        <code>core.mjs</code>.
+      </p>
+    </details>
+
+    <script type="module">
+      import { tryEsm } from "./src/esm-demo.js";
+      import { tryUmd } from "./src/umd-demo.js";
+
+      // Vite replaces import.meta.env.BASE_URL with the configured base at build
+      // time; at dev time it is "/" so the UMD script loads from the dev server.
+      const base = import.meta.env.BASE_URL;
+
+      document.getElementById("esm-btn").addEventListener("click", () => {
+        tryEsm(
+          document.getElementById("esm-status"),
+          document.getElementById("esm-plot"),
+        );
+      });
+
+      document.getElementById("umd-btn").addEventListener("click", () => {
+        tryUmd(
+          document.getElementById("umd-status"),
+          document.getElementById("umd-plot"),
+          base,
+        );
+      });
+    </script>
+  </body>
+</html>
