@@ -1,6 +1,6 @@
 # jsroot 7.11.0 — circular dependency evaluation-order bug when bundled via Vite/Rollup
 
-**Live demo**: _replace with your GitHub Pages URL after deploying_
+**Live demo**: https://grzanka.github.io/jsroot-7-11-issue/
 
 ---
 

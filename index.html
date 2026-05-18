@@ -135,9 +135,7 @@ Object.assign(internals.jsroot, { ObjectPainter, cleanup, resize });</pre>
       import { tryEsm } from "./src/esm-demo.js";
       import { tryUmd } from "./src/umd-demo.js";
 
-      // Vite replaces import.meta.env.BASE_URL with the configured base at build
-      // time; at dev time it is "/" so the UMD script loads from the dev server.
-      const base = import.meta.env.BASE_URL;
+      const base = import.meta.env?.BASE_URL ?? "./";
 
       document.getElementById("esm-btn").addEventListener("click", () => {
         tryEsm(
